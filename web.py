@@ -236,7 +236,7 @@ class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def end_headers(self):
 
-        path = self.path.split('?', 1)[0]
+        path = getattr(self, 'path', '').split('?', 1)[0]
         if path.endswith(('.js', '.css', '.html')):
             self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.send_header('Pragma', 'no-cache')

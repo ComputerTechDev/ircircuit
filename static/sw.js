@@ -1,5 +1,5 @@
 
-const CACHE = 'webirc-v15';
+const CACHE = 'webirc-v16';
 const PRECACHE = [
     '/',
     '/static/style.css',

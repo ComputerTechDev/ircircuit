@@ -19,7 +19,7 @@ const irc = Object.freeze({
     },
 
     hookCommand(cmd, cb, userdata = null) {
-        const key = cmd.toLowerCase().replace(/^\
+        const key = cmd.toLowerCase().replace(/^\//, '');
         (_hookCommand[key] = _hookCommand[key] || []).push({ cb, ud: userdata });
     },
 
@@ -3007,7 +3007,7 @@ function saveAliases() {
         const cmd = row.children[0].value.trim().toLowerCase();
         const action = row.children[1].value.trim();
         if (cmd && action) {
-            aliases[cmd.replace(/^\
+            aliases[cmd.replace(/^\//, '')] = action;
         }
     }
     state.settings.aliases = aliases;
