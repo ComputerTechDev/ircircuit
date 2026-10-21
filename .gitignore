@@ -1,0 +1,15 @@
+data/networks.json
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/webirc.pid
+data/push_subscriptions.json
+data/highlights.json
+data/backlog/
+data/logs/
+data/uploads/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.swp

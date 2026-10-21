@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover,interactive-widget=resizes-content">
+    <title>WebIRC</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono&family=Fira+Code&family=Inter&family=Roboto+Mono&display=swap">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="WebIRC">
+    <meta name="theme-color" content="#141414">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <link rel="stylesheet" href="/static/style.css" media="screen">
+    <link rel="stylesheet" href="/static/mobile.css?v=13"
+        media="screen and (max-width: 768px), screen and (max-height: 500px) and (pointer: coarse)">
+</head>
+
+<body>
+    <div id="app">
+
+        <div id="mobile-backdrop"></div>
+        <div id="mobile-header">
+            <button id="m-toggle-tree" class="m-toggle" aria-label="Channels">
+                <svg viewBox="0 0 24 24">
+                    <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
+                </svg>
+            </button>
+            <div id="m-title-wrap">
+                <span id="ws-dot-m" class="dot disconnected"></span>
+                <div id="m-title">WebIRC</div>
+            </div>
+            <button id="m-toggle-users" class="m-toggle" aria-label="Users">
+                <svg viewBox="0 0 24 24">
+                    <path
+                        d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
+                </svg>
+            </button>
+        </div>
+
+        <div id="login-modal" class="modal hidden">
+            <div class="modal-backdrop"></div>
+            <div class="modal-win" style="width:300px">
+                <div class="modal-tb">
+                    <span>Login Required</span>
+                </div>
+                <div class="modal-body">
+                    <p style="margin-bottom:10px; color:var(--dim); font-size:12px">Please authenticate to access the
+                        Bouncer.</p>
+                    <div id="li-error" style="color:var(--red); font-size:12px; margin-bottom:10px" class="hidden">
+                    </div>
+                    <div class="fgrid">
+                        <label>Username</label>
+                        <input id="li-user" type="text" placeholder="Username">
+                        <label>Password</label>
+                        <input id="li-pass" type="password" placeholder="Password">
+                    </div>
+                    <div class="mactions">
+                        <span class="spacer"></span>
+                        <button id="btn-login" class="btn-primary">Login</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="menubar">
+            <div class="menu-group">
+                <div class="menu-dd" id="irc-menu">
+                    <span class="menu-item" id="menu-server">IRC</span>
+                    <div class="dd-popup hidden" id="irc-popup">
+                        <div id="dd-networks" class="dd-item">Networks</div>
+                        <div id="dd-chanlist" class="dd-item">Channel List</div>
+                        <div id="dd-logs" class="dd-item">Logs</div>
+                        <div id="dd-settings" class="dd-item">Preferences</div>
+                        <div id="dd-plugins" class="dd-item">Plugins</div>
+                    </div>
+                </div>
+            </div>
+            <div id="ws-status">
+                <span id="ws-dot" class="dot disconnected"></span>
+                <span id="ws-label">Connecting…</span>
+            </div>
+        </div>
+
+        <div id="main-layout">
+
+            <div id="server-tree">
+                <div id="tree-content"></div>
+                <div id="mobile-tree-menu">
+                    <div id="mtm-networks" class="mtm-item">Networks</div>
+                    <div id="mtm-chanlist" class="mtm-item">Channel List</div>
+                    <div id="mtm-settings" class="mtm-item">Settings</div>
+                    <div id="mtm-plugins" class="mtm-item">Plugins</div>
+                </div>
+            </div>
+
+            <div id="chat-area">
+                <div id="topic-bar">
+                    <span id="topic-chan">#</span>
+                    <span id="topic-sep">|</span>
+                    <span id="topic-modes"></span>
+                    <span id="topic-text" title="Click to edit topic (requires % or higher)">Welcome to WebIRC</span>
+                    <span class="topic-stats">
+                        <span id="topic-ucount"></span>
+                        <span id="topic-latency" class="topic-latency"></span>
+                        <span id="topic-ssl"></span>
+                    </span>
+                </div>
+                <div id="buf-search-bar" class="hidden">
+                    <span class="buf-search-lbl">Search</span>
+                    <input id="buf-search-inp" type="text" placeholder="Filter messages…">
+                    <button id="buf-search-clear" class="btn-sm">&#x2715;</button>
+                </div>
+                <div id="chat-buffer">
+                    <div class="buf-placeholder">Select a channel, or open <strong>Settings → Networks</strong> to
+                        connect.</div>
+                </div>
+                <button id="scroll-bottom-pill" title="Jump to latest">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+                        <path d="M12 15.5l-7-7 1.4-1.4L12 12.7l5.6-5.6L19 8.5z" />
+                    </svg>
+                    <span id="scroll-bottom-count"></span>
+                </button>
+                <div id="cmd-suggest-popup" class="hidden"></div>
+                <div id="emoji-suggest-popup" class="hidden"></div>
+                <div id="input-bar">
+                    <span id="own-nick">-</span>
+                    <span class="isep">&gt;</span>
+                    <input id="input" type="text" autocomplete="off" spellcheck="false"
+                        placeholder="/connect, /join #channel, or type a message…">
+                    <button id="upload-btn" title="Upload File">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:block;">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                        </svg>
+                    </button>
+                    <input type="file" id="file-input" style="display: none;">
+                    <button id="m-send-btn">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div id="userlist-panel">
+                <div id="userlist-head">Users <span id="user-count"></span></div>
+                <div id="userlist"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <div id="settings-modal" class="modal hidden">
+        <div id="settings-backdrop" class="modal-backdrop"></div>
+        <div class="modal-win settings-win">
+            <div class="modal-tb">
+                <span>Preferences</span>
+                <button id="settings-close" class="modal-x">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-search-wrap">
+                    <input id="settings-search" type="text" placeholder="Search settings…" autocomplete="off" spellcheck="false">
+                </div>
+                <div class="modal-body-tabs">
+                    <span class="m-tab active" data-tab="p-identity">Identity</span>
+                    <span class="m-tab" data-tab="p-security">Security</span>
+                    <span class="m-tab" data-tab="p-bouncer">Bouncer</span>
+                    <span class="m-tab" data-tab="p-theme">Theme</span>
+                    <span class="m-tab" data-tab="p-aliases">Aliases</span>
+                    <span class="m-tab" data-tab="p-highlights">Highlights</span>
+                    <span class="m-tab" data-tab="p-advanced">Advanced</span>
+                </div>
+
+                <div id="p-identity" class="p-tab active">
+                    <div class="fsec">Global Identity</div>
+                    <div class="fgrid">
+                        <label>Nickname</label> <input id="id-nick" type="text" placeholder="WebUser">
+                        <label>Username</label> <input id="id-user" type="text" placeholder="webuser">
+                        <label>Real Name</label> <input id="id-real" type="text" placeholder="Web IRC Client">
+                        <label>Verbose Logs</label>
+                        <label class="tog"><input id="id-verbose" type="checkbox"><span class="tog-tr"></span><span
+                                class="tog-lbl">Enabled</span></label>
+                    </div>
+                    <div class="fsec">Backup</div>
+                    <div style="display:flex;gap:8px;margin-bottom:8px">
+                        <button id="btn-export" class="btn-sec">Export Settings</button>
+                        <button id="btn-import" class="btn-sec">Import Settings</button>
+                    </div>
+                    <button id="btn-save-identity" class="btn-primary" style="margin-top:9px">Save Identity</button>
+                </div>
+
+                <div id="p-security" class="p-tab hidden">
+                    <div class="fsec">Bouncer Authentication</div>
+                    <div class="fgrid">
+                        <label>Enable Login</label>
+                        <label class="tog"><input id="auth-enabled" type="checkbox"><span class="tog-tr"></span><span
+                                class="tog-lbl">Required</span></label>
+                    </div>
+                    <div id="auth-fields" class="fgrid disabled" style="margin-top:10px">
+                        <label>Username</label> <input id="auth-user" type="text">
+                        <label>Password</label> <input id="auth-pass" type="password">
+                    </div>
+                    <div class="fsec" style="margin-top:20px">Notifications</div>
+                    <div class="fgrid">
+                        <label>Browser Notifications</label>
+                        <label class="tog"><input id="pref-notifications" type="checkbox"><span
+                                class="tog-tr"></span><span class="tog-lbl">Disabled</span></label>
+                        <label>Push Notifications</label>
+                        <label class="tog"><input id="pref-push-notifications" type="checkbox"><span
+                                class="tog-tr"></span><span class="tog-lbl">Disabled</span></label>
+                    </div>
+                    <button id="btn-save-security" class="btn-primary" style="margin-top:15px">Save Security</button>
+                </div>
+
+                <div id="p-bouncer" class="p-tab hidden">
+                    <div class="fsec">Auto-Reconnect</div>
+                    <div class="fgrid">
+                        <label>Enable</label>
+                        <label class="tog"><input id="bnc-reconn" type="checkbox" checked><span
+                                class="tog-tr"></span><span class="tog-lbl">Enabled</span></label>
+                        <label>Initial Delay</label>
+                        <div class="sz-wrap"><input id="bnc-reconn-base" type="number" min="1" max="60" value="5"
+                                style="width:70px"> <span class="tog-lbl">seconds</span></div>
+                        <label>Max Delay</label>
+                        <div class="sz-wrap"><input id="bnc-reconn-max" type="number" min="10" max="600" value="300"
+                                style="width:70px"> <span class="tog-lbl">seconds</span></div>
+                    </div>
+                    <div class="fsec">Flood Protection</div>
+                    <div class="fgrid">
+                        <label>Enable</label>
+                        <label class="tog"><input id="bnc-flood" type="checkbox" checked><span
+                                class="tog-tr"></span><span class="tog-lbl">Enabled</span></label>
+                        <label>Rate</label>
+                        <div class="sz-wrap"><input id="bnc-flood-rate" type="number" min="1" max="20" value="4"
+                                style="width:70px"> <span class="tog-lbl">msg/sec</span></div>
+                        <label>Burst</label>
+                        <div class="sz-wrap"><input id="bnc-flood-burst" type="number" min="1" max="20" value="5"
+                                style="width:70px"> <span class="tog-lbl">messages</span></div>
+                    </div>
+                    <div class="fsec">Keepalive</div>
+                    <div class="fgrid">
+                        <label>Enable</label>
+                        <label class="tog"><input id="bnc-ping" type="checkbox" checked><span
+                                class="tog-tr"></span><span class="tog-lbl">Enabled</span></label>
+                        <label>Ping Interval</label>
+                        <div class="sz-wrap"><input id="bnc-ping-int" type="number" min="15" max="300" value="60"
+                                style="width:70px"> <span class="tog-lbl">seconds</span></div>
+                        <label>Pong Timeout</label>
+                        <div class="sz-wrap"><input id="bnc-pong-to" type="number" min="30" max="600" value="120"
+                                style="width:70px"> <span class="tog-lbl">seconds</span></div>
+                    </div>
+                    <div class="fsec">Connection</div>
+                    <div class="fgrid">
+                        <label>Connect Timeout</label>
+                        <div class="sz-wrap"><input id="bnc-conn-to" type="number" min="5" max="60" value="15"
+                                style="width:70px"> <span class="tog-lbl">seconds</span></div>
+                    </div>
+                    <div class="fsec">Message Routing</div>
+                    <div class="fgrid">
+                        <label>Route WHOIS to active</label>
+                        <label class="tog"><input id="pref-route-whois" type="checkbox"><span
+                                class="tog-tr"></span><span class="tog-lbl">Enabled</span></label>
+                        <label>Route Notices to active</label>
+                        <label class="tog"><input id="pref-route-notices" type="checkbox"><span
+                                class="tog-tr"></span><span class="tog-lbl">Enabled</span></label>
+                        <label>WHOIS Style<br><span style="font-size:10px;opacity:.6">Disabled = classic lines in
+                                PM</span></label>
+                        <label class="tog"><input id="pref-modern-whois" type="checkbox" checked><span
+                                class="tog-tr"></span><span class="tog-lbl">Modern Cards</span></label>
+                        <label>Confirm commands</label>
+                        <label class="tog"><input id="bnc-confirm-cmds" type="checkbox"><span
+                                class="tog-tr"></span><span class="tog-lbl">Prompt before executing</span></label>
+                    </div>
+                    <div class="fsec">Backlog</div>
+                    <div class="fgrid">
+                        <label>Backlog size per channel<br><span style="font-size:10px;opacity:.6">Messages replayed on
+                                reconnect</span></label>
+                        <div class="sz-wrap"><input id="bnc-backlog-size" type="number" min="50" max="2000" value="200"
+                                style="width:70px"> <span class="tog-lbl">messages</span></div>
+                    </div>
+                    <button id="btn-save-bouncer" class="btn-primary" style="margin-top:15px">Save Bouncer
+                        Settings</button>
+                </div>
+
+                <div id="p-theme" class="p-tab hidden">
+                    <div class="fsec">Theme</div>
+                    <div class="theme-presets">
+                        <button class="btn-preset" data-preset="classic">Classic Dark</button>
+                        <button class="btn-preset" data-preset="light">Modern Light</button>
+                        <button class="btn-preset" data-preset="monokai">Monokai</button>
+                        <button id="btn-reset-theme" class="btn-preset btn-sec">Reset</button>
+                    </div>
+                    <div class="theme-grid">
+                        <label>Background</label> <input class="cpick" type="color" data-var="--bg">
+                        <label>Side panels</label> <input class="cpick" type="color" data-var="--panel">
+                        <label>Topic/input bar</label><input class="cpick" type="color" data-var="--panel2">
+                        <label>Top/Mobile Bar</label><input class="cpick" type="color" data-var="--bar">
+                        <label>Menus/Popups</label> <input class="cpick" type="color" data-var="--popup">
+                        <label>Hover</label> <input class="cpick" type="color" data-var="--hover">
+                        <label>Active channel</label><input class="cpick" type="color" data-var="--active">
+                        <label>Borders</label> <input class="cpick" type="color" data-var="--border">
+                        <label>Text</label> <input class="cpick" type="color" data-var="--text">
+                        <label>Dim text</label> <input class="cpick" type="color" data-var="--dim">
+                        <label>Navigation / Menus</label> <input class="cpick" type="color" data-var="--nav-text">
+                        <label>Channel list text</label> <input class="cpick" type="color" data-var="--tree-text">
+                        <label>Accent / links</label><input class="cpick" type="color" data-var="--accent">
+                        <label>Scrollbar</label> <input class="cpick" type="color" data-var="--scroll-thumb">
+                        <label>Scroll hover</label> <input class="cpick" type="color" data-var="--scroll-hover">
+                        <label>Join / online</label> <input class="cpick" type="color" data-var="--green">
+                        <label>Error / part</label> <input class="cpick" type="color" data-var="--red">
+                        <label>Highlight</label> <input class="cpick" type="color" data-var="--yellow">
+                        <label>Notices</label> <input class="cpick" type="color" data-var="--purple">
+
+                        <label
+                            style="color:var(--accent);grid-column:1/span 2;margin-top:5px;font-size:11px;text-transform:uppercase">Classic
+                            Events</label>
+                        <label>WHOIS Nick</label> <input class="cpick" type="color" data-var="--whois-nick-color">
+                        <label>WHOIS Host</label> <input class="cpick" type="color" data-var="--whois-host-color">
+                        <label>WHOIS Info</label> <input class="cpick" type="color" data-var="--whois-info-color">
+                        <label>Join Color</label> <input class="cpick" type="color" data-var="--join-text">
+                        <label>Quit/Part Color</label> <input class="cpick" type="color" data-var="--quit-text">
+                        <label>Nick/chan names</label>
+                        <div style="display:flex;gap:4px;align-items:center">
+                            <input class="cpick" type="color" data-var="--nick-color"
+                                title="Fixed colour for nicks &amp; channel names (overrides the nick colour preferences below)">
+                            <button id="btn-clear-nick-color" class="btn-sm"
+                                title="Auto: use the nick colour preferences below">Auto</button>
+                        </div>
+                        <label>Your nick colour</label>
+                        <input id="pref-own-nick-color" type="color" value="#e06c75" title="Colour of your own nick">
+                        <label>Others' nick colour</label>
+                        <input id="pref-other-nick-color" type="color" value="#61afef" title="Colour of other nicks">
+                    </div>
+                    <div class="fgrid" style="margin-top:8px">
+                        <label>Font size</label>
+                        <div class="sz-wrap">
+                            <input id="theme-sz" type="range" min="11" max="18" value="13">
+                            <span id="theme-sz-lbl">13px</span>
+                        </div>
+                        <label>Font family</label>
+                        <select id="theme-font"
+                            style="background:#111;border:1px solid #3a3a3a;color:var(--text);font-size:12px;padding:4px 6px;font-family:var(--font)">
+                            <option value="'Consolas', 'Courier New', monospace">Consolas (default)</option>
+                            <option value="'JetBrains Mono', monospace">JetBrains Mono</option>
+                            <option value="'Fira Code', monospace">Fira Code</option>
+                            <option value="'Roboto Mono', monospace">Roboto Mono</option>
+                            <option value="'Inter', sans-serif">Inter (sans-serif)</option>
+                            <option value="system-ui, sans-serif">System UI</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="p-aliases" class="p-tab hidden">
+                    <div class="fsec">Command Aliases</div>
+                    <p style="color:var(--dim); font-size:12px; margin-bottom:10px;">
+                        Add custom slash commands. Use $1, $2 for arguments, $1+ for all remaining. Special tokens:
+                        $nick (your nick), $chan (current channel), $net (network name).
+                    </p>
+                    <div id="alias-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+                    <button id="btn-add-alias" class="btn-sm" style="margin-top:10px">+ Add Alias</button>
+                    <button id="btn-save-aliases" class="btn-primary" style="margin-top:15px; display:block;">Save
+                        Aliases</button>
+                </div>
+
+                <div id="p-highlights" class="p-tab hidden">
+                    <div class="fsec">Custom Alert Words</div>
+                    <p style="color:var(--dim);font-size:12px;margin-bottom:8px">Get highlighted when these words appear
+                        in any message. One word per line.</p>
+                    <textarea id="hl-words" rows="4" class="settings-ta" placeholder="helpdesk"></textarea>
+                    <div class="fsec">Watched Nicks</div>
+                    <p style="color:var(--dim);font-size:12px;margin-bottom:8px">Get notified when these users join,
+                        quit, or change nick. One nick per line.</p>
+                    <textarea id="hl-watched" rows="4" class="settings-ta" placeholder="friend1"></textarea>
+                    <div class="fsec">Sound</div>
+                    <div class="fgrid">
+                        <label>Beep on highlight</label>
+                        <label class="tog"><input id="hl-sound" type="checkbox"><span class="tog-tr"></span><span
+                                class="tog-lbl">Disabled</span></label>
+                    </div>
+                    <div class="fsec">Ignore List</div>
+                    <p style="color:var(--dim);font-size:12px;margin-bottom:8px">Mute messages from these nicks or masks
+                        (e.g. <code>spammer</code> or <code>*!*@bad.host</code>). You can also use
+                        <code>/ignore nick</code> in chat.
+                    </p>
+                    <div id="ignore-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+                    <div style="display:flex;gap:6px;align-items:center">
+                        <input id="ignore-add-inp" type="text" placeholder="nick or mask…" style="flex:1">
+                        <button id="ignore-add-btn" class="btn-sm">+ Add</button>
+                    </div>
+                    <button id="btn-save-highlights" class="btn-primary" style="margin-top:15px">Save
+                        Highlights</button>
+                </div>
+
+                <div id="p-advanced" class="p-tab hidden">
+                    <div class="fsec">Debugging & Advanced</div>
+                    <div class="fgrid">
+                        <label>Show Raw Console</label>
+                        <label class="tog">
+                            <input id="pref-raw-console" type="checkbox">
+                            <span class="tog-tr"></span><span class="tog-lbl">Disabled</span>
+                        </label>
+                        <label>Embed Images & Videos</label>
+                        <label class="tog">
+                            <input id="pref-embed-media" type="checkbox">
+                            <span class="tog-tr"></span><span class="tog-lbl">Disabled</span>
+                        </label>
+                        <label>Proxy Embedded Media</label>
+                        <label class="tog">
+                            <input id="pref-media-proxy" type="checkbox">
+                            <span class="tog-tr"></span><span class="tog-lbl">Disabled</span>
+                        </label>
+                        <label>Condense JOIN/PART/QUIT</label>
+                        <label class="tog">
+                            <input id="pref-condense-events" type="checkbox">
+                            <span class="tog-tr"></span><span class="tog-lbl">Disabled</span>
+                        </label>
+                        <label>Auto-Away (idle detection)</label>
+                        <label class="tog">
+                            <input id="pref-auto-away" type="checkbox">
+                            <span class="tog-tr"></span><span class="tog-lbl">Disabled</span>
+                        </label>
+                    </div>
+                    <div id="pref-auto-away-fields" class="fgrid disabled" style="margin-top:10px">
+                        <label>Idle time</label>
+                        <div class="sz-wrap"><input id="pref-auto-away-mins" type="number" min="1" max="120" value="10"
+                                style="width:70px"> <span class="tog-lbl">minutes</span></div>
+                        <label>Away message</label>
+                        <input id="pref-auto-away-msg" type="text" placeholder="Auto-away">
+                    </div>
+                    <div class="fsec" style="margin-top:15px">File Uploads</div>
+                    <div class="fgrid">
+                        <label>Upload Source</label>
+                        <select id="pref-upload-mode"
+                            style="background:#111;border:1px solid #3a3a3a;color:var(--text);font-size:12px;padding:4px 6px;font-family:var(--font)">
+                            <option value="local">Local uploads (built-in)</option>
+                            <option value="custom">Custom API endpoint</option>
+                        </select>
+                        <label>Custom Endpoint</label>
+                        <input id="pref-upload-endpoint" type="text" placeholder="/api/upload">
+                    </div>
+                    <p style="color:var(--dim); font-size:11px; margin-top:8px; margin-bottom:0;">
+                        Custom uploads are relayed through WebIRC, so the browser does not need CORS access. The endpoint should accept <code>multipart/form-data</code> with a <code>file</code> field and return JSON with a <code>url</code> or <code>link</code> property.
+                    </p>
+                    <div class="fgrid" style="margin-top:15px">
+                        <label>Spell Check Input</label>
+                        <label class="tog">
+                            <input id="pref-spellcheck" type="checkbox">
+                            <span class="tog-tr"></span><span class="tog-lbl">Disabled</span>
+                        </label>
+                    </div>
+                    <p style="color:var(--dim); font-size:11px; margin-top:10px;">
+                        Note: Enabling the Raw Console will increase bandwidth usage as it streams every IRC line to
+                        your browser.
+                    </p>
+                    <button id="btn-save-advanced" class="btn-primary" style="margin-top:15px">Save Advanced</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="netlist-modal" class="modal hidden">
+        <div id="netlist-backdrop" class="modal-backdrop"></div>
+        <div class="modal-win settings-win">
+            <div class="modal-tb">
+                <span>IRC Networks</span>
+                <button id="netlist-close" class="modal-x">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="panel-hdr">Networks <button id="btn-add-network" class="btn-sm">+ Add</button></div>
+                <div id="net-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="net-modal" class="modal hidden">
+        <div id="netmodal-backdrop" class="modal-backdrop"></div>
+        <div class="modal-win net-win">
+            <div class="modal-tb">
+                <span id="net-modal-title">Add Network</span>
+                <button id="netmodal-close" class="modal-x">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="fgrid">
+                    <label>Network Preset</label>
+                    <div id="nw-presets" class="nw-presets-row"></div>
+                </div>
+                <div class="fgrid">
+                    <label>Name</label> <input id="nw-name" type="text" placeholder="e.g. Libera.Chat">
+                    <label>Server</label> <input id="nw-host" type="text" placeholder="irc.libera.chat">
+                    <label>Port</label> <input id="nw-port" type="number" value="6697">
+                    <label>SSL / TLS</label>
+                    <label class="tog"><input id="nw-ssl" type="checkbox" checked><span class="tog-tr"></span><span
+                            class="tog-lbl">Enabled</span></label>
+                    <label>Verify Cert</label>
+                    <label class="tog"><input id="nw-vssl" type="checkbox" checked><span class="tog-tr"></span><span
+                            class="tog-lbl">Verify</span></label>
+                    <label>Nick</label> <input id="nw-nick" type="text" placeholder="WebUser">
+                    <label>Username</label> <input id="nw-uname" type="text" placeholder="webuser">
+                    <label>Real Name</label> <input id="nw-real" type="text" placeholder="Web IRC Client">
+                </div>
+
+                <div class="fsec">SASL Authentication</div>
+                <div class="fgrid">
+                    <label>Enable SASL</label>
+                    <label class="tog"><input id="nw-sasl" type="checkbox"><span class="tog-tr"></span><span
+                            class="tog-lbl">Enabled</span></label>
+                    <label>Mechanism</label>
+                    <select id="nw-sasl-mech" disabled
+                        style="background:#111;border:1px solid #3a3a3a;color:var(--text);font-size:12px;padding:4px 6px;font-family:var(--font)">
+                        <option value="PLAIN">PLAIN (username + password)</option>
+                        <option value="EXTERNAL">EXTERNAL (TLS client certificate)</option>
+                    </select>
+                    <label id="nw-sasl-u-lbl">SASL User</label> <input id="nw-sasl-u" type="text" placeholder="account"
+                        disabled>
+                    <label id="nw-sasl-p-lbl">SASL Pass</label> <input id="nw-sasl-p" type="password"
+                        placeholder="password" disabled>
+                    <label id="nw-sasl-cert-lbl" class="hidden">Cert File</label>
+                    <div id="nw-sasl-cert-container" class="hidden" style="display:flex;gap:8px;align-items:center;">
+                        <input id="nw-sasl-cert" type="text" placeholder="/path/to/client.crt or upload..." style="flex:1;min-width:0;" disabled>
+                        <button type="button" id="nw-sasl-cert-upload-btn" class="btn-sm" style="padding:5px 10px;height:30px;flex-shrink:0;">Upload</button>
+                        <input type="file" id="nw-sasl-cert-file" style="display:none;">
+                    </div>
+                    <label id="nw-sasl-key-lbl" class="hidden">Key File</label>
+                    <div id="nw-sasl-key-container" class="hidden" style="display:flex;gap:8px;align-items:center;">
+                        <input id="nw-sasl-key" type="text" placeholder="/path/to/client.key or upload..." style="flex:1;min-width:0;" disabled>
+                        <button type="button" id="nw-sasl-key-upload-btn" class="btn-sm" style="padding:5px 10px;height:30px;flex-shrink:0;">Upload</button>
+                        <input type="file" id="nw-sasl-key-file" style="display:none;">
+                    </div>
+                </div>
+
+                <div class="fsec">Connection Mode</div>
+                <div class="mode-cards">
+                    <label class="mode-card">
+                        <input type="radio" name="nw-mode" id="nw-mode-direct" value="direct" checked>
+                        <span class="mode-card-body">
+                            <span class="mode-card-info">
+                                <strong>Session</strong>
+                                <small>Connects when WebIRC is open. Disconnects when the browser closes. Good for
+                                    casual use.</small>
+                            </span>
+                        </span>
+                    </label>
+                    <label class="mode-card">
+                        <input type="radio" name="nw-mode" id="nw-mode-bouncer" value="bouncer">
+                        <span class="mode-card-body">
+                            <span class="mode-card-info">
+                                <strong>Always-On</strong>
+                                <small>Stays connected 24/7 even when the browser is closed. Missed messages replay on
+                                    reconnect.</small>
+                            </span>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="fsec">Automation</div>
+                <div class="fgrid">
+                    <label>Autojoin</label> <input id="nw-ajoin" type="text" placeholder="#linux #python">
+                    <label>Auto-connect</label>
+                    <label class="tog"><input id="nw-auto" type="checkbox"><span class="tog-tr"></span><span
+                            class="tog-lbl">Connect on startup</span></label>
+
+                    <label>Logging</label>
+                    <label class="tog"><input id="nw-logging" type="checkbox"><span class="tog-tr"></span><span
+                            class="tog-lbl">Log to file</span></label>
+
+                    <label>Auto-rejoin on kick</label>
+                    <label class="tog"><input id="nw-autorejoin" type="checkbox"><span class="tog-tr"></span><span
+                            class="tog-lbl">Enabled</span></label>
+
+                    <label>Rejoin delay</label>
+                    <div class="sz-wrap"><input id="nw-rejoin-delay" type="number" min="0" max="60" value="3"
+                            style="width:70px"> <span class="tog-lbl">seconds</span></div>
+                </div>
+
+                <div class="fsec">Connect Commands (Perform)</div>
+                <div style="padding: 0 10px;">
+                    <textarea id="nw-perform" rows="3" placeholder="/msg NickServ IDENTIFY password"
+                        style="width:100%;background:#111;border:1px solid #3a3a3a;color:var(--text);font-family:var(--font);font-size:12px;padding:6px;outline:none;resize:vertical;"></textarea>
+                    <small style="color:var(--dim);display:block;margin-top:4px;">One command per line. Ran on
+                        connect.</small>
+                </div>
+            </div>
+            <div class="mactions">
+                <button class="btn-danger hidden" id="nw-del">Delete</button>
+                <span class="spacer"></span>
+                <button id="nw-cancel" class="btn-sec">Cancel</button>
+                <button id="nw-save" class="btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ctx-menu" class="hidden"></div>
+
+    <div id="log-modal" class="modal hidden">
+        <div id="log-backdrop" class="modal-backdrop"></div>
+        <div class="modal-win log-win">
+            <div class="modal-tb log-tb">
+                <span>Logs</span>
+                <div class="log-tb-nav">
+                    <select id="log-net-sel"></select>
+                    <select id="log-chan-sel"></select>
+                </div>
+                <button id="log-close" class="modal-x">×</button>
+            </div>
+            <div class="modal-body" style="padding:0">
+                <div id="log-viewer-container">
+                    <div id="log-sidebar">
+                        <div id="log-date-filter">
+                            <input type="date" id="log-date-filter-inp" title="Jump to date">
+                        </div>
+                        <div id="log-dates" class="list-nav" tabindex="-1"></div>
+                    </div>
+                    <div id="log-content-area">
+                        <div id="log-search-bar">
+                            <input id="log-search-input" type="text" placeholder="Search logs…">
+                            <button id="log-search-btn" class="btn-sm">Search</button>
+                            <label
+                                style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--dim);cursor:pointer;user-select:none">
+                                <input id="log-search-all" type="checkbox"> All channels
+                            </label>
+                            <button id="log-download-btn" class="btn-sm">Download</button>
+                        </div>
+                        <div id="log-status"></div>
+                        <div id="log-lines"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="list-modal" class="modal hidden">
+        <div id="list-backdrop" class="modal-backdrop"></div>
+        <div class="modal-win list-win">
+            <div class="modal-tb">
+                <span>Channel List</span>
+                <button id="list-close" class="modal-x">&#x2715;</button>
+            </div>
+            <div class="list-search-bar">
+                <input id="list-search-inp" type="text" placeholder="Filter by name or topic…">
+                <span id="list-count" class="list-count"></span>
+            </div>
+            <div id="list-table-wrap">
+                <table id="list-table">
+                    <thead>
+                        <tr>
+                            <th>Channel</th>
+                            <th style="text-align:right">Users</th>
+                            <th>Topic</th>
+                        </tr>
+                    </thead>
+                    <tbody id="list-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="plugin-modal" class="modal hidden">
+        <div id="plugin-backdrop" class="modal-backdrop"></div>
+        <div class="modal-win plugin-win">
+            <div class="modal-tb">
+                <span>Plugin Manager</span>
+                <button id="plugin-close" class="modal-x">×</button>
+            </div>
+            <div class="plugin-layout">
+
+                <div class="plugin-list-panel">
+                    <div class="plugin-list-hdr">
+                        Plugins
+                        <button id="btn-new-plugin" class="btn-sm"
+                            title="New Python (server-side) plugin">+ Python</button>
+                        <button id="btn-new-js-plugin" class="btn-sm"
+                            title="New JS (client-side) plugin">+ JS</button>
+                    </div>
+                    <div id="plugin-list"></div>
+                </div>
+
+                <div class="plugin-editor-panel">
+                    <div id="plugin-editor-empty" class="plugin-editor-empty">
+                        <span>← Select a plugin to edit,<br>or click <strong>+ New</strong></span>
+                    </div>
+                    <div id="plugin-editor-content" class="hidden">
+                        <div class="plugin-editor-hdr">
+                            <span id="plugin-lang-badge" class="plugin-lang-badge python">Python</span>
+                            <input id="plugin-name-inp" type="text"
+                                placeholder="plugin-name (letters, numbers, hyphens)">
+                            <div class="plugin-editor-actions">
+                                <button class="btn-danger btn-sm hidden" id="plugin-del-btn">Delete</button>
+                                <button id="btn-save-plugin" class="btn-sm">Save</button>
+                                <button id="btn-save-load-plugin" class="btn-primary">Save &amp; Load</button>
+                            </div>
+                        </div>
+                        <textarea id="plugin-editor" spellcheck="false"
+                            placeholder="// webirc plugin — HexChat-style API&#10;//&#10;// webirc.hook_print('Channel Message', (word, word_eol) => {&#10;//   // word[0]=nick  word[1]=message  word[2]=channel  word[3]=network&#10;//   webirc.prnt('saw: ' + word[0] + ': ' + word[1]);&#10;//   return webirc.EAT_NONE;  // or EAT_ALL to suppress&#10;// });&#10;//&#10;// webirc.hook_command('hello', (word, word_eol) => {&#10;//   // /hello world  →  word=['hello','world']  word_eol=['hello world','world']&#10;//   webirc.prnt('Hello ' + (word[1] || 'World') + '!');&#10;//   return webirc.EAT_ALL;&#10;// }, 'Usage: HELLO [name]');&#10;//&#10;// Print events: Channel Message, Your Message, Private Message,&#10;//   Your Private Message, Channel Action, Your Action, Channel Notice,&#10;//   Join, Part, Quit, Nick, Kick, Mode Change, Topic Change, Server Text&#10;//&#10;// webirc.prnt(text)                  — print to current buffer&#10;// webirc.command('join #channel')    — run a command&#10;// webirc.get_info('nick'|'channel'|'network'|'server')&#10;// webirc.get_context()               — context: { prnt, command, get_info }&#10;// webirc.find_context({network, channel})&#10;// webirc.send_msg(network, target, text)&#10;// webirc.send_raw(network, line)&#10;// webirc.state                       — read-only app state"></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/static/app.js?v=42"></script>
+</body>
+
+</html>
