@@ -9,9 +9,10 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 PID_FILE = os.path.join(ROOT_DIR, "data", "webirc.pid")
 LOG_DIR = os.path.join(ROOT_DIR, "data", "logs")
 
-_VENV_PY = os.path.join(ROOT_DIR, ".venv", "bin", "python")
+_VENV_DIR = os.path.join(ROOT_DIR, ".venv")
+_VENV_PY = os.path.join(_VENV_DIR, "bin", "python")
 if (os.path.exists(_VENV_PY) and os.access(_VENV_PY, os.X_OK) and
-        os.path.realpath(sys.executable) != os.path.realpath(_VENV_PY)):
+        os.path.abspath(sys.prefix) != os.path.abspath(_VENV_DIR)):
     os.execv(_VENV_PY, [_VENV_PY] + sys.argv)
 
 

@@ -1,3 +1,13 @@
+import sys
+import os
+
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+_VENV_DIR = os.path.join(ROOT_DIR, ".venv")
+_VENV_PY = os.path.join(_VENV_DIR, "bin", "python")
+if (os.path.exists(_VENV_PY) and os.access(_VENV_PY, os.X_OK) and
+        os.path.abspath(sys.prefix) != os.path.abspath(_VENV_DIR)):
+    os.execv(_VENV_PY, [_VENV_PY] + sys.argv)
+
 import asyncio
 import websockets
 import json
@@ -3191,7 +3201,8 @@ async def main():
         log.warning(f"WebSocket bind host is non-local ({bind_host}). Ensure firewall/reverse-proxy protection is in place.")
 
     async with websockets.serve(ws_handler, bind_host, 8765, ssl=ssl_ctx,
-                                max_size=1_048_576, process_request=_check_origin):
+                                max_size=1_048_576, process_request=_check_origin,
+                                reuse_address=True):
         log.info(f"Bouncer listening on {bind_host}:8765 {'(SSL enabled)' if ssl_ctx else ''}")
         await stop_event.wait()
 
