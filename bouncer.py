@@ -1006,6 +1006,15 @@ class NetworkConnection:
     def _is_me(self, other):
         return bool(other) and other.lower() == (self.nick or "").lower()
 
+    def _resolve_channel_key(self, channel):
+        if channel in self.channels or channel in self._names_temp:
+            return channel
+        low = (channel or "").lower()
+        for k in list(self.channels) + list(self._names_temp):
+            if k.lower() == low:
+                return k
+        return channel
+
     def _add_backlog(self, channel, msg):
         self.backlog[channel].append(msg)
         self._backlog_dirty = True
@@ -1848,8 +1857,8 @@ class NetworkConnection:
             await broadcast(m)
 
         elif cmd == "332":
-            parts = raw.split(" ", 4)
-            channel = parts[3] if len(parts) > 3 else target
+            _p = parsed.get("params", [])
+            channel = _p[1] if len(_p) > 1 else target
             self._log_to_file(channel, "Server", f"Topic for {channel} is: {message}", type='topic')
             await self.emit_log(f"* Topic for {channel} is: {message}", channel=channel)
             m = {"type": "topic", "network": self.id, "channel": channel, "topic": message}
@@ -1857,33 +1866,46 @@ class NetworkConnection:
             await broadcast(m)
 
         elif cmd == "333":
-            parts = raw.split()
-            if len(parts) > 5:
-                channel = parts[3]
-                setter = parts[4]
+            _p = parsed.get("params", [])
+            if len(_p) > 3:
+                channel = _p[1]
+                setter = _p[2]
                 try:
-                    st = int(parts[5])
+                    st = int(_p[3])
                     dt_str = datetime.fromtimestamp(st).strftime('%a %b %d %H:%M:%S %Y')
                 except (ValueError, OSError):
-                    dt_str = parts[5] if len(parts) > 5 else ''
+                    dt_str = _p[3]
                 await self.emit_log(f"* Topic for {channel} set by {setter} ({dt_str})", channel=channel)
 
         elif cmd == "353":
-            parts = raw.split()
-            channel = parts[4] if len(parts) > 4 else target
+            # params: <me> [<symbol>] <channel>  :names  (symbol is optional on some ircds)
+            _p = parsed.get("params", [])
+            channel = _p[-1] if len(_p) >= 2 else target
+            channel = self._resolve_channel_key(channel)
 
             if channel not in self._names_temp:
                 self._names_temp[channel] = {}
             for n in message.split():
-                bare = n.lstrip("~&@%+")
-                self._names_temp[channel][bare] = n
+                full = n.lstrip("~&@%+!.*")
+                prefixes = n[:len(n) - len(full)]
+                # userhost-in-names: nick!user@host
+                bare = full.split("!", 1)[0]
+                if not bare:
+                    continue
+                self._names_temp[channel][bare] = prefixes + bare
         elif cmd == "366":
-            parts = raw.split()
-            channel = parts[3] if len(parts) > 3 else target
+            _p = parsed.get("params", [])
+            channel = _p[1] if len(_p) > 1 else target
+            channel = self._resolve_channel_key(channel)
 
             if channel in self._names_temp:
-                self.channels[channel] = self._names_temp.pop(channel)
-            users = sorted(self.channels.get(channel, {}).values(), key=lambda n: n.lstrip("~&@%+"))
+                # Merge: keep ourselves even if the server omitted us from NAMES
+                _new = self._names_temp.pop(channel)
+                for _k, _v in self.channels.get(channel, {}).items():
+                    if self._is_me(_k) and _k not in _new:
+                        _new[_k] = _v
+                self.channels[channel] = _new
+            users = sorted(self.channels.get(channel, {}).values(), key=lambda n: n.lstrip("~&@%+!.*").lower())
             await broadcast({"type": "names", "network": self.id, "channel": channel, "users": users})
 
             if len(self.channels.get(channel, {})) <= 300:
