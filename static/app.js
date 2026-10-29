@@ -34,7 +34,7 @@ const irc = Object.freeze({
     prnt(text, bufKey) {
         const key = bufKey || state.active;
         if (!key) return;
-        const [netId, ch] = key.split('/');
+        const [netId, ch] = splitKey(key);
         sysMsg(netId, ch || 'Status', String(text), 'status');
     },
 
@@ -487,6 +487,13 @@ setInterval(() => {
     }
 }, 30_000);
 
+// Buffer keys are "<netId>/<target>"; targets (e.g. nicks on some ircds) may themselves contain '/'.
+function splitKey(k) {
+    k = k || '';
+    const i = k.indexOf('/');
+    return i < 0 ? [k] : [k.slice(0, i), k.slice(i + 1)];
+}
+
 let ws = null;
 function wsConnect() {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -589,7 +596,7 @@ function handleDeepLink() {
         switchBuf(HIGHLIGHTS_KEY);
         return true;
     }
-    const parts = hashVal.split('/');
+    const parts = splitKey(hashVal);
     if (parts.length === 2) {
         const netId = parts[0];
         const target = parts[1];
@@ -833,8 +840,8 @@ function onAction(m) {
 function onNotice(m) {
     let ch = m.channel;
     if (state.settings.bouncer?.routeNotices && ch === 'Status') {
-        const [activeNet] = (state.active || '').split('/');
-        if (activeNet === m.network) ch = state.active.split('/')[1] || 'Status';
+        const [activeNet] = splitKey(state.active || '');
+        if (activeNet === m.network) ch = splitKey(state.active)[1] || 'Status';
     }
     pushRec(`${m.network}/${ch}`, { type: 'notice', nick: m.nick, text: m.message, ts: m.ts });
 }
@@ -907,7 +914,7 @@ function onNickChange(m) {
     }
 
     if (state.active?.startsWith(m.network + '/') &&
-        chans.includes(state.active.split('/')[1])) {
+        chans.includes(splitKey(state.active)[1])) {
         renderUserList();
     }
 
@@ -1005,7 +1012,7 @@ function onTopic(m) {
 }
 function editTopic() {
     if (!state.active) return;
-    const [netId, chan] = state.active.split('/');
+    const [netId, chan] = splitKey(state.active);
     if (!chan || chan === 'Status') return;
     const span = $('topic-text');
     if (span.classList.contains('editing')) return;
@@ -1058,7 +1065,7 @@ function onNames(m) {
     const key = `${m.network}/${m.channel}`;
     const map = {};
     m.users.forEach(u => {
-        const pfx = u.match(/^[~&@%+]+/)?.[0] || '';
+        const pfx = u.match(/^[~&@%+!.*]+/)?.[0] || '';
         map[u.slice(pfx.length)] = pfx;
     });
     state.nicks[key] = map;
@@ -1420,9 +1427,9 @@ function _renderBuffer(key, startIdx, rmPos) {
     fetchPreviewsInElement(buf);
     if (_cgrp) _evGroupDom[key] = _cgrp;
 
-    const chan = key.split('/')[1];
+    const chan = splitKey(key)[1];
     if (startIdx === 0 && b.length > 0 && chan && chan.startsWith('#')) {
-        const netId = key.split('/')[0];
+        const netId = splitKey(key)[0];
         const hint = mk('div', 'load-earlier-hint');
         hint.textContent = 'Load earlier messages...';
         hint.onclick = () => requestOlderHistory(netId, chan, key);
@@ -1458,7 +1465,7 @@ function switchBuf(key) {
 
     closeMobilePanels();
 
-    const [netId, chan] = key.split('/');
+    const [netId, chan] = splitKey(key);
 
     const mt = $('m-title');
     if (mt) mt.textContent = (chan === 'Status' ? (state.networks[netId]?.name || netId) : chan) || 'WebIRC';
@@ -1513,7 +1520,7 @@ function _onBufScroll() {
         buf.scrollTop = buf.scrollHeight - prevH + prevT;
         _windowScrollBusy = false;
     } else {
-        const [netId, chan] = key.split('/');
+        const [netId, chan] = splitKey(key);
         if (chan && chan.startsWith('#')) requestOlderHistory(netId, chan, key);
     }
 }
@@ -1528,7 +1535,7 @@ function showWelcome() {
 }
 function updateTopBar() {
     if (!state.active) return;
-    const [netId, ch] = state.active.split('/');
+    const [netId, ch] = splitKey(state.active);
     const net = state.networks[netId];
     const ownNickEl = $('own-nick');
     if (ownNickEl) {
@@ -1752,7 +1759,7 @@ function buildLine(rec) {
 
     if (rec.type === 'privmsg') {
         nick.textContent = rec.nick;
-        const _net = rec.network || (state.active || '').split('/')[0];
+        const _net = rec.network || splitKey(state.active || '')[0];
         nick.style.color = nickColour(rec.nick, _net);
         nick.style.cursor = 'pointer';
         nick.onclick = () => {
@@ -1765,7 +1772,7 @@ function buildLine(rec) {
         txt.innerHTML += formatText(esc(rec.text));
     } else if (rec.type === 'action') {
         nick.textContent = '*';
-        const _net2 = rec.network || (state.active || '').split('/')[0];
+        const _net2 = rec.network || splitKey(state.active || '')[0];
         const actionColour = nickColour(rec.nick, _net2);
         nick.style.color = actionColour;
         nick.style.cursor = 'pointer';
@@ -2005,7 +2012,7 @@ function renderUserList() {
         return ra - rb || a[0].localeCompare(b[0]);
     });
     $('user-count').textContent = `(${entries.length})`;
-    const [netId] = (state.active || '').split('/');
+    const [netId] = splitKey(state.active || '');
     const awaySet = state.away[netId] || new Set();
     const botSet = state.bots[netId] || new Set();
     const frag = document.createDocumentFragment();
@@ -2379,7 +2386,7 @@ function handleTab() {
         if (!stub) return;
 
         let matches = [];
-        const [netId] = (state.active || '').split('/');
+        const [netId] = splitKey(state.active || '');
 
         const nicks = Object.keys(state.nicks[state.active] || {});
         matches.push(...nicks.filter(n => n.toLowerCase().startsWith(stub)));
@@ -2432,7 +2439,7 @@ if (sendBtn) {
 
 function sendMsg(text) {
     if (!state.active) return;
-    const [netId, ch] = state.active.split('/');
+    const [netId, ch] = splitKey(state.active);
     if (!ch || ch === 'Status') {
         sysMsg(null, null, "Choose a channel or user to message.", "error");
         return;
@@ -2442,7 +2449,7 @@ function sendMsg(text) {
 
 function getActiveNetId() {
     if (state.active) {
-        const [nid] = state.active.split('/');
+        const [nid] = splitKey(state.active);
         if (nid && state.networks[nid]) return nid;
     }
 
@@ -2470,7 +2477,7 @@ function handleCommand(raw) {
             if (idx >= args.length) return '';
             return plus ? args.slice(idx).join(' ') : args[idx];
         });
-        const [_aNet, _aChan] = (state.active || '').split('/');
+        const [_aNet, _aChan] = splitKey(state.active || '');
         out = out
             .replace(/\$nick/g, (state.networks[_aNet] || {}).nick || '')
             .replace(/\$chan/g, _aChan || '')
@@ -2496,7 +2503,7 @@ function handleCommand(raw) {
             break;
         case 'part':
         case 'leave': {
-            const [, ch] = (state.active || '/').split('/');
+            const [, ch] = splitKey(state.active || '/');
             wsSend({ type: 'part', network: netId, channel: args[0] || ch, reason: args.slice(1).join(' ') || 'Leaving' });
             break;
         }
@@ -2569,7 +2576,7 @@ function handleCommand(raw) {
             openSettings();
             break;
         case 'me': {
-            const [nid, ch] = state.active ? state.active.split('/') : [];
+            const [nid, ch] = state.active ? splitKey(state.active) : [];
             if (!ch || ch === 'Status') { sysMsg(null, null, 'Choose a channel or user first.', 'error'); break; }
             wsSend({ type: 'privmsg', network: nid, target: ch, message: `\x01ACTION ${args.join(' ')}\x01` });
             break;
@@ -2583,7 +2590,7 @@ function handleCommand(raw) {
             break;
         case 'topic':
             if (state.active) {
-                const [nid, ch] = state.active.split('/');
+                const [nid, ch] = splitKey(state.active);
                 if (args.length) wsSend({ type: 'raw', network: nid, line: `TOPIC ${ch} :${args.join(' ')}` });
                 else sysMsg(nid, ch, `Topic: ${state.topics[state.active] || '(none)'}`);
             }
@@ -2684,7 +2691,7 @@ function handleCommand(raw) {
             }
             break;
         case 'kick': {
-            const [nid, ch] = (state.active || '').split('/');
+            const [nid, ch] = splitKey(state.active || '');
             const argIsChan = !!(args[0] && /^[#&!+]/.test(args[0]));
             const target = argIsChan ? args[1] : args[0];
             const channel = argIsChan ? args[0] : ch;
@@ -2693,7 +2700,7 @@ function handleCommand(raw) {
             break;
         }
         case 'mode': {
-            const [nid, ch] = (state.active || '').split('/');
+            const [nid, ch] = splitKey(state.active || '');
             if (args[0] && /^[#&!+]/.test(args[0])) {
                 wsSend({ type: 'raw', network: netId, line: `MODE ${args.join(' ')}` });
             } else if (ch) {
@@ -2702,7 +2709,7 @@ function handleCommand(raw) {
             break;
         }
         case 'ban': {
-            const [nid, ch] = (state.active || '').split('/');
+            const [nid, ch] = splitKey(state.active || '');
             if (args[0] && ch) wsSend({ type: 'raw', network: netId, line: `MODE ${ch} +b ${args[0]}!*@*` });
             break;
         }
@@ -3577,7 +3584,7 @@ function showCtxMenu(e, nick) {
     m.style.top = Math.min(e.clientY, window.innerHeight - 260) + 'px';
     m.classList.remove('hidden');
 
-    const [nid, chan] = (state.active || '').split('/');
+    const [nid, chan] = splitKey(state.active || '');
     const net = state.networks[nid] || {};
     const nicks = state.nicks[state.active] || {};
     const myNick = net.nick;
@@ -4024,7 +4031,7 @@ function updateTitle() {
     if (state.active === HIGHLIGHTS_KEY) {
         label = 'Highlights';
     } else if (state.active) {
-        const [netId, chan] = state.active.split('/');
+        const [netId, chan] = splitKey(state.active);
         label = chan === 'Status' ? (state.networks[netId]?.name || netId) : chan;
     }
     const suffix = label ? `${label} — WebIRC` : 'WebIRC';
@@ -4185,7 +4192,7 @@ function closeQuickSwitcher() {
 function filterQuickSwitcher(term, list) {
     const t = term.toLowerCase();
     _quickSwitcherResults = getAllBufferKeys().filter(k => {
-        const [nid, ch] = k.split('/');
+        const [nid, ch] = splitKey(k);
         const name = (ch || state.networks[nid]?.name || nid).toLowerCase();
         return !t || name.includes(t);
     });
@@ -4203,7 +4210,7 @@ function updateQuickSwitcherSelection(list) {
 function renderQuickSwitcherList(list) {
     list.innerHTML = '';
     _quickSwitcherResults.slice(0, 20).forEach((key, i) => {
-        const [nid, ch] = key.split('/');
+        const [nid, ch] = splitKey(key);
         const net = state.networks[nid] || {};
         const name = ch || net.name || nid;
         const item = mk('div', 'qs-item' + (i === _quickSwitcherIndex ? ' qs-active' : ''));
@@ -4374,7 +4381,7 @@ function _openResultInContext(date, channel, network, ts) {
 
 function openLogViewer() {
     if (!state.active) return sysMsg(null, null, 'Join a channel or speak to a user first to view logs.', 'error');
-    const [net, chan] = state.active.split('/');
+    const [net, chan] = splitKey(state.active);
     $('log-modal').classList.remove('hidden');
     _populateLogSelectors();
     openLogViewerFor(net, chan);
@@ -4823,7 +4830,7 @@ function showNetCtxMenu(e, netId) {
 }
 
 function showTreeCtxMenu(e, key, isPinned) {
-    const [netId, ch] = key.split('/');
+    const [netId, ch] = splitKey(key);
     const net = state.networks[netId] || {};
     const isChannel = ch && ch.match(/^[#&!+]/);
     const isDm = ch && !isChannel && ch !== 'Status' && ch !== 'Console';
@@ -4861,7 +4868,7 @@ function togglePin(key) {
     renderTree();
 }
 function closeBuf(key) {
-    const [netId, ch] = key.split('/');
+    const [netId, ch] = splitKey(key);
     if (!ch || ch === 'Status') return;
     delete state.buffers[key]; delete state.nicks[key];
     delete state.seenRecords[key];
