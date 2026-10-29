@@ -855,7 +855,11 @@ function onJoin(m) {
     }
     _firePrint('Join', [m.nick, m.channel, m.network]);
     for (const cb of (_pluginEventHooks['join'] || [])) { try { cb(m); } catch (e) { } }
-    pushRec(key, { type: 'join', nick: '', icon: '>', text: `${m.nick} joined ${m.channel}`, ts: Date.now() / 1e3 });
+    if (m.self) {
+        mkBuf(key);
+    } else {
+        pushRec(key, { type: 'join', nick: '', icon: '>', text: `${m.nick} joined ${m.channel}`, ts: Date.now() / 1e3 });
+    }
     if (state.active === key) renderUserList();
     watchedNickAlert(m.nick, `joined ${m.channel}`, key);
 }

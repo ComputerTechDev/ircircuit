@@ -2028,8 +2028,10 @@ class NetworkConnection:
                 self.channels.setdefault(channel, {})[nick] = nick
 
             self._log_to_file(channel, nick, f"joined {channel}", type='join')
-            m = {"type": "join", "network": self.id, "channel": channel, "nick": nick}
-            self._add_backlog(channel, m)
+            is_self_join = self._is_me(nick)
+            m = {"type": "join", "network": self.id, "channel": channel, "nick": nick, "self": is_self_join}
+            if not is_self_join:
+                self._add_backlog(channel, m)
             await broadcast(m)
 
         elif cmd == "PART":
