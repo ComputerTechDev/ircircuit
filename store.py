@@ -107,3 +107,72 @@ def migrate_backlog_json(net_id, backlog_dict):
                 count += 1
         conn.commit()
     return count
+
+
+def search_messages(network, channel=None, query="", limit=200):
+    if not query:
+        return []
+    with _lock:
+        conn = _get_conn()
+        safe_query = query.replace('"', '""')
+        sql = """
+            SELECT m.data, m.network, m.channel, m.ts, m.nick, m.text
+            FROM messages_fts f
+            JOIN messages m ON f.rowid = m.id
+            WHERE messages_fts MATCH ?
+        """
+        params = [f'"{safe_query}"']
+        if network and network != "*":
+            sql += " AND m.network = ?"
+            params.append(network)
+        if channel and channel != "*":
+            sql += " AND m.channel = ?"
+            params.append(channel)
+        sql += " ORDER BY m.ts DESC LIMIT ?"
+        params.append(limit)
+
+        rows = []
+        try:
+            cur = conn.execute(sql, params)
+            fetched = cur.fetchall()
+        except Exception:
+            fetched = []
+
+        if not fetched:
+            # Fallback to LIKE if FTS expression is empty or fails
+            like_sql = "SELECT data, network, channel, ts, nick, text FROM messages WHERE (text LIKE ? OR nick LIKE ?)"
+            like_params = [f"%{query}%", f"%{query}%"]
+            if network and network != "*":
+                like_sql += " AND network = ?"
+                like_params.append(network)
+            if channel and channel != "*":
+                like_sql += " AND channel = ?"
+                like_params.append(channel)
+            like_sql += " ORDER BY ts DESC LIMIT ?"
+            like_params.append(limit)
+            try:
+                cur = conn.execute(like_sql, like_params)
+                fetched = cur.fetchall()
+            except Exception:
+                fetched = []
+
+        from datetime import datetime
+        for r in fetched:
+            try:
+                data = json.loads(r[0])
+            except Exception:
+                data = {}
+            data.setdefault("network", r[1])
+            data.setdefault("channel", r[2])
+            data.setdefault("ts", r[3])
+            data.setdefault("nick", r[4])
+            data.setdefault("text", r[5] or data.get("message", ""))
+            data.setdefault("type", "message")
+            ts_val = data.get("ts") or r[3]
+            try:
+                data["date"] = datetime.fromtimestamp(float(ts_val)).strftime("%d-%m-%Y")
+            except (ValueError, OSError, TypeError):
+                data["date"] = ""
+            rows.append(data)
+        return rows
+

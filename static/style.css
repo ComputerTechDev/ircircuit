@@ -691,6 +691,18 @@ mark {
     padding: 0 1px;
 }
 
+.typing-indicator {
+    font-size: 11px;
+    font-style: italic;
+    color: var(--dim);
+    padding: 2px 12px;
+    min-height: 16px;
+    line-height: 16px;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    transition: opacity 0.15s ease-in-out;
+}
+
 #input-bar {
     display: flex;
     align-items: center;

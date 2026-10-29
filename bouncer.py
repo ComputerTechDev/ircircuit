@@ -537,6 +537,62 @@ def _get_log_index(log_path):
         pass
     return offsets
 
+def _search_disk_logs(nid, channel, query, all_channels, cap=200):
+    query_lower = query.lower()
+    safe_net = _net_log_name(nid)
+    base_logs = os.path.abspath(IRC_LOG_BASE)
+    net_dir = os.path.abspath(os.path.join(base_logs, safe_net))
+    if not net_dir.startswith(base_logs + os.sep) and net_dir != base_logs:
+        return [], 0, False
+
+    results = []
+    total_scanned = 0
+    truncated = False
+
+    if all_channels:
+        search_dirs = []
+        if os.path.isdir(net_dir):
+            for entry in sorted(os.listdir(net_dir)):
+                candidate = os.path.join(net_dir, entry)
+                if os.path.isdir(candidate) and candidate.startswith(net_dir + os.sep):
+                    search_dirs.append((entry, candidate))
+    else:
+        safe_chan = channel.replace("/", "_").replace("\\", "_")
+        log_dir = os.path.abspath(os.path.join(net_dir, safe_chan))
+        if not log_dir.startswith(base_logs + os.sep) and log_dir != base_logs:
+            return [], 0, False
+        search_dirs = [(channel, log_dir)]
+
+    for chan_name, log_dir in search_dirs:
+        if not os.path.exists(log_dir):
+            continue
+        files = sorted([f for f in os.listdir(log_dir) if f.endswith(".log")], reverse=True)
+        for f_name in files:
+            date = f_name.replace(".log", "")
+            f_path = os.path.join(log_dir, f_name)
+            try:
+                fh = open(f_path, "r", encoding="utf-8")
+            except OSError:
+                continue
+            with fh as f:
+                for line in f:
+                    total_scanned += 1
+                    data = _parse_log_line(line, date)
+                    if not data:
+                        continue
+                    if query_lower in data.get("text", "").lower() or query_lower in data.get("nick", "").lower():
+                        data["date"] = date
+                        data["channel"] = chan_name
+                        results.append(data)
+                        if len(results) >= cap:
+                            truncated = True
+                            break
+            if truncated:
+                break
+        if truncated:
+            break
+    return results, total_scanned, truncated
+
 async def broadcast(msg, debug_only=False):
 
     authenticated_clients = [c for c in clients if getattr(c, "authenticated", False)]
@@ -978,6 +1034,16 @@ class NetworkConnection:
         self._nick_retries = 0
         self._pending_local_echo = collections.defaultdict(list)
         self._recent_local_echo = {}
+
+    def get_prefix_modes_and_chars(self):
+        prefix_str = self._isupport.get("PREFIX", "")
+        if prefix_str and prefix_str.startswith("(") and ")" in prefix_str:
+            modes, pfxs = prefix_str[1:].split(")", 1)
+            if len(modes) == len(pfxs):
+                m2p = dict(zip(modes, pfxs))
+                return m2p, pfxs
+        return {"q": "~", "a": "&", "o": "@", "h": "%", "v": "+"}, "~&@%+"
+
 
         bc = bnc_cfg()
         self._tokens = bc.get("floodBurst", DEFAULTS["floodBurst"])
@@ -1823,8 +1889,9 @@ class NetworkConnection:
                 net_name = self._isupport["NETWORK"]
                 if self.name == self.id:
                     self.name = net_name
-                    await self._emit_status()
+            await self._emit_status()
             await self.emit_log(f"* Supported: {' '.join(tokens)}", verbose=True)
+
 
         elif cmd == "433":
             if self._registered:
@@ -1885,14 +1952,16 @@ class NetworkConnection:
 
             if channel not in self._names_temp:
                 self._names_temp[channel] = {}
+            mode_to_pfx, pfx_order = self.get_prefix_modes_and_chars()
             for n in message.split():
-                full = n.lstrip("~&@%+!.*")
+                full = n.lstrip(pfx_order + "!.*")
                 prefixes = n[:len(n) - len(full)]
                 # userhost-in-names: nick!user@host
                 bare = full.split("!", 1)[0]
                 if not bare:
                     continue
                 self._names_temp[channel][bare] = prefixes + bare
+
         elif cmd == "366":
             _p = parsed.get("params", [])
             channel = _p[1] if len(_p) > 1 else target
@@ -2014,6 +2083,16 @@ class NetworkConnection:
                 self._add_backlog(ch, m)
                 await broadcast(m)
 
+        elif cmd == "TAGMSG":
+            typing_status = tags.get("+typing") or tags.get("typing")
+            if typing_status:
+                ch = target if target.startswith(("#", "&")) else nick
+                await broadcast({
+                    "type": "typing", "network": self.id, "channel": ch,
+                    "nick": nick, "status": typing_status
+                })
+
+
         elif cmd == "JOIN":
             channel = target if (target.startswith("#") or target.startswith("&")) else message
             if self._is_me(nick):
@@ -2131,7 +2210,7 @@ class NetworkConnection:
                     mode_str = parts[0]
                     mode_args = parts[1:]
                     add = True
-                    mode_to_prefix = {"o": "@", "v": "+", "h": "%", "a": "&", "q": "~"}
+                    mode_to_prefix, pfx_order = self.get_prefix_modes_and_chars()
 
                     non_pfx_arg = frozenset("beIk")
                     arg_idx = 0
@@ -2148,13 +2227,13 @@ class NetworkConnection:
                                     old_pfx = old[:len(old) - len(tn)]
                                     if add:
                                         if pfx not in old_pfx:
-
                                             ordered = ''.join(
-                                                ch for ch in "~&@%+" if ch == pfx or ch in old_pfx
+                                                ch for ch in pfx_order if ch == pfx or ch in old_pfx
                                             )
                                             self.channels[target][tn] = ordered + tn
                                     else:
                                         self.channels[target][tn] = old_pfx.replace(pfx, "", 1) + tn
+
                         elif mc in non_pfx_arg:
                             arg_idx += 1
                         elif mc == 'l' and add:
@@ -2366,12 +2445,27 @@ class NetworkConnection:
                 if wt: wt['away'] = message
                 await self.emit_log(f"* [{wnick}] is away: {message}", is_whois=True, whois_nick=wnick,
                                     whois_data={"nick": wnick, "msg": f"is away: {message}"})
-            elif cmd == "352":
-
-                if len(p) >= 7:
+            elif cmd in ("352", "354"):
+                who_chan = None
+                who_nick = None
+                who_flags = None
+                if cmd == "352" and len(p) >= 7:
                     who_chan = p[1]
                     who_nick = p[5]
                     who_flags = p[6]
+                elif len(p) >= 4:
+                    for tok in p[1:]:
+                        if tok.startswith(('#', '&')):
+                            who_chan = tok
+                        elif any(f in tok for f in ('G', 'H', 'B', '*')):
+                            who_flags = tok
+                    if who_chan and not who_nick:
+                        for tok in p[2:]:
+                            if tok != who_chan and tok != who_flags and not tok.isdigit():
+                                who_nick = tok
+                                break
+
+                if who_chan and who_nick and who_flags:
                     if who_chan not in self._who_away_temp:
                         self._who_away_temp[who_chan] = set()
                     if 'G' in who_flags:
@@ -2380,6 +2474,7 @@ class NetworkConnection:
                         self._who_bots_temp[who_chan] = set()
                     if 'B' in who_flags or 'b' in who_flags:
                         self._who_bots_temp[who_chan].add(who_nick)
+
             elif cmd == "315":
 
                 who_chan = p[1] if len(p) > 1 else ''
@@ -2663,7 +2758,9 @@ class NetworkConnection:
         await broadcast({"type": "network_status", "network": self.id, "name": self.name,
                          "nick": self.nick, "status": self.status,
                          "channels": list(self.channels.keys()),
-                         "latency": self.latency_ms, "ssl": self._current_ssl})
+                         "latency": self.latency_ms, "ssl": self._current_ssl,
+                         "isupport": dict(self._isupport)})
+
 
 async def ws_handler(ws):
     clients.add(ws)
@@ -2683,7 +2780,8 @@ async def ws_handler(ws):
             net_states.append({"id": nid, "name": n.get("name", nid),
                                "nick": conn.nick if conn else n.get("nick", "WebUser"),
                                "status": conn.status if conn else "disconnected",
-                               "channels": list(conn.channels.keys()) if conn else []})
+                               "channels": list(conn.channels.keys()) if conn else [],
+                               "isupport": dict(conn._isupport) if conn else {}})
         try:
             enabled_plugins = s.get("plugins", {}).get("enabled", [])
             js_plugins = await _js_plugins_for_client(enabled_plugins)
@@ -2981,66 +3079,46 @@ async def ws_handler(ws):
                     "date": date, "total": total, "from": start_idx, "lines": lines
                 }))
 
+            elif t == "typing":
+                nid = str(msg.get("network", ""))
+                target = str(msg.get("target", ""))
+                status = str(msg.get("status", "active"))
+                conn = networks.get(nid)
+                if conn and conn.writer:
+                    conn._queue(f"@+typing={status} TAGMSG {target}")
+
             elif t == "search_logs":
                 nid     = str(msg.get("network", ""))
                 channel = str(msg.get("channel", ""))
-                query   = str(msg.get("query", "")).lower()
+                query   = str(msg.get("query", "")).strip()
                 all_channels = (channel == "*" or channel == "")
                 if not query: continue
 
-                safe_net  = _net_log_name(nid)
-                base_logs = os.path.abspath(IRC_LOG_BASE)
-                net_dir   = os.path.abspath(os.path.join(base_logs, safe_net))
-                if not net_dir.startswith(base_logs + os.sep) and net_dir != base_logs: continue
+                loop = asyncio.get_running_loop()
+                target_chan = None if all_channels else channel
+                # Run SQLite FTS5 search in thread executor
+                results = await loop.run_in_executor(
+                    None, lambda: store.search_messages(nid, target_chan, query, limit=200)
+                )
 
-                _SEARCH_CAP = 200
-                results = []
-                total_scanned = 0
-                truncated = False
+                if results:
+                    await ws.send(json.dumps({
+                        "type": "search_results", "network": nid, "channel": channel,
+                        "query": query, "results": results, "total_scanned": len(results),
+                        "truncated": len(results) >= 200, "all_channels": all_channels
+                    }))
+                    continue
 
-                if all_channels:
-                    search_dirs = []
-                    if os.path.isdir(net_dir):
-                        for entry in sorted(os.listdir(net_dir)):
-                            candidate = os.path.join(net_dir, entry)
-                            if os.path.isdir(candidate) and candidate.startswith(net_dir + os.sep):
-                                search_dirs.append((entry, candidate))
-                else:
-                    safe_chan = channel.replace("/", "_").replace("\\", "_")
-                    log_dir  = os.path.abspath(os.path.join(net_dir, safe_chan))
-                    if not log_dir.startswith(base_logs + os.sep) and log_dir != base_logs: continue
-                    search_dirs = [(channel, log_dir)]
-
-                for chan_name, log_dir in search_dirs:
-                    if not os.path.exists(log_dir): continue
-                    files = sorted([f for f in os.listdir(log_dir) if f.endswith(".log")], reverse=True)
-                    for f_name in files:
-                        date   = f_name.replace(".log", "")
-                        f_path = os.path.join(log_dir, f_name)
-                        try:
-                            fh = open(f_path, "r", encoding="utf-8")
-                        except OSError:
-                            continue
-                        with fh as f:
-                            for line in f:
-                                total_scanned += 1
-                                data = _parse_log_line(line, date)
-                                if not data: continue
-                                if query in data.get("text", "").lower() or query in data.get("nick", "").lower():
-                                    data["date"]    = date
-                                    data["channel"] = chan_name
-                                    results.append(data)
-                                    if len(results) >= _SEARCH_CAP:
-                                        truncated = True
-                                        break
-                        if truncated: break
-                    if truncated: break
-
+                # Fallback to disk logs in executor if DB has no historical records
+                disk_res, total_scanned, truncated = await loop.run_in_executor(
+                    None, lambda: _search_disk_logs(nid, channel, query, all_channels)
+                )
                 await ws.send(json.dumps({
                     "type": "search_results", "network": nid, "channel": channel,
-                    "query": query, "results": results, "total_scanned": total_scanned,
+                    "query": query, "results": disk_res, "total_scanned": total_scanned,
                     "truncated": truncated, "all_channels": all_channels
                 }))
+
 
             elif t == "plugin_list":
                 plugin_dir = os.path.join(ROOT_DIR, "data", "bouncer_plugins")

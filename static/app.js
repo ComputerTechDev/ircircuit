@@ -428,7 +428,9 @@ const state = {
     seenRecords: {},
     renderStart: {},
     highlightList: [],
-    highlightsUnread: 0
+    highlightsUnread: 0,
+    isupport: {},
+    typing: {}
 };
 
 const MAX_BUF = 2000;
@@ -535,6 +537,7 @@ function dispatch(m) {
         case 'network_status': return onNetStatus(m);
         case 'reconnect_countdown': return onReconnectCountdown(m);
         case 'message': onMessage(m); return;
+        case 'typing': onTyping(m); return;
         case 'action': onAction(m); return;
         case 'notice': onNotice(m); return;
         case 'highlight': onHighlight(m); return;
@@ -629,6 +632,7 @@ function onInit(m) {
     if (state.settings.theme) applyTheme(state.settings.theme);
     for (const n of (m.networks || [])) {
         state.networks[n.id] = { ...n, channels: n.channels || [] };
+        if (n.isupport) state.isupport[n.id] = n.isupport;
 
         mkBuf(`${n.id}/Status`);
         for (const ch of (n.channels || [])) mkBuf(`${n.id}/${ch}`);
@@ -678,6 +682,7 @@ function onNetStatus(m) {
         ssl: m.ssl ?? prev.ssl ?? false,
         away: prev.away ?? false
     };
+    if (m.isupport) state.isupport[m.network] = m.isupport;
     if (m.latency != null) state.pingLatency[m.network] = m.latency;
 
     mkBuf(`${m.network}/Status`);
@@ -822,6 +827,10 @@ function onMessage(m) {
     if (_firePrint(event, [m.nick, m.message, m.channel, m.network])) return;
     const hl = !m.self && isHighlight(m.nick, m.message, m.network);
     pushRec(key, { type: 'privmsg', nick: m.nick, text: m.message, ts: m.ts, self: !!m.self, hl, network: m.network });
+    if (state.typing?.[key]?.[m.nick]) {
+        delete state.typing[key][m.nick];
+        updateTypingDisplay();
+    }
     if (!m.self && (hl || isDM)) notify(m.nick || m.network, m.message, key);
 
     for (const cb of (_pluginEventHooks['message'] || [])) { try { cb(m); } catch (e) { } }
@@ -835,6 +844,10 @@ function onAction(m) {
     if (_firePrint(event, [m.nick, m.message, m.channel, m.network])) return;
     const hl = !m.self && isHighlight(m.nick, m.message, m.network);
     pushRec(key, { type: 'action', nick: m.nick, text: m.message, ts: m.ts, self: !!m.self, hl, network: m.network });
+    if (state.typing?.[key]?.[m.nick]) {
+        delete state.typing[key][m.nick];
+        updateTypingDisplay();
+    }
     if (!m.self && (hl || isDM)) notify(m.nick || m.network, `* ${m.nick} ${m.message}`, key);
 }
 function onNotice(m) {
@@ -844,6 +857,95 @@ function onNotice(m) {
         if (activeNet === m.network) ch = splitKey(state.active)[1] || 'Status';
     }
     pushRec(`${m.network}/${ch}`, { type: 'notice', nick: m.nick, text: m.message, ts: m.ts });
+}
+
+let _typingTimer = null;
+function updateTypingDisplay() {
+    const el = $('typing-indicator');
+    if (!el) return;
+    const key = state.active;
+    if (!key || !state.typing || !state.typing[key]) {
+        el.classList.add('hidden');
+        el.textContent = '';
+        return;
+    }
+    const now = Date.now();
+    const typers = [];
+    for (const [nick, expiry] of Object.entries(state.typing[key])) {
+        if (expiry > now) {
+            typers.push(nick);
+        } else {
+            delete state.typing[key][nick];
+        }
+    }
+    if (typers.length === 0) {
+        el.classList.add('hidden');
+        el.textContent = '';
+        return;
+    }
+    el.classList.remove('hidden');
+    if (typers.length === 1) {
+        el.textContent = `${typers[0]} is typing...`;
+    } else if (typers.length === 2) {
+        el.textContent = `${typers[0]} and ${typers[1]} are typing...`;
+    } else {
+        el.textContent = `${typers[0]} and ${typers.length - 1} others are typing...`;
+    }
+
+    if (!_typingTimer) {
+        _typingTimer = setInterval(() => {
+            const k = state.active;
+            const hasTypers = k && state.typing?.[k] && Object.values(state.typing[k]).some(exp => exp > Date.now());
+            updateTypingDisplay();
+            if (!hasTypers) {
+                clearInterval(_typingTimer);
+                _typingTimer = null;
+            }
+        }, 1500);
+    }
+}
+
+function onTyping(m) {
+    if (!m || !m.nick || !m.target) return;
+    const isChannel = m.target.startsWith('#') || m.target.startsWith('&') || m.target.startsWith('+') || m.target.startsWith('!');
+    const chan = isChannel ? m.target : m.nick;
+    const key = `${m.network}/${chan}`;
+    if (!state.typing) state.typing = {};
+    if (!state.typing[key]) state.typing[key] = {};
+
+    if (m.status === 'active') {
+        state.typing[key][m.nick] = Date.now() + 6000;
+    } else {
+        delete state.typing[key][m.nick];
+    }
+    updateTypingDisplay();
+}
+
+let _lastTypingSent = 0;
+let _typingStopTimeout = null;
+
+function notifyTyping(active) {
+    if (!state.active) return;
+    const [netId, target] = splitKey(state.active);
+    if (!netId || !target || target === 'Status' || target === 'Console' || state.active === HIGHLIGHTS_KEY) return;
+    const now = Date.now();
+    if (active) {
+        if (now - _lastTypingSent > 3000) {
+            _lastTypingSent = now;
+            wsSend({ type: 'typing', network: netId, target, status: 'active' });
+        }
+        clearTimeout(_typingStopTimeout);
+        _typingStopTimeout = setTimeout(() => {
+            notifyTyping(false);
+        }, 5000);
+    } else {
+        clearTimeout(_typingStopTimeout);
+        _typingStopTimeout = null;
+        if (_lastTypingSent > 0) {
+            _lastTypingSent = 0;
+            wsSend({ type: 'typing', network: netId, target, status: 'done' });
+        }
+    }
 }
 function onJoin(m) {
     const key = `${m.network}/${m.channel || 'Status'}`;
@@ -956,6 +1058,28 @@ function onKick(m) {
     pushRec(key, { type: 'kick', nick: '', icon: 'x', text: `${m.nick} kicked ${m.kicked}${m.message ? ` (${m.message})` : ''}`, ts: Date.now() / 1e3 });
     if (state.active === key) renderUserList();
 }
+function getPrefixInfo(netId) {
+    const isupport = (state.isupport && state.isupport[netId]) || {};
+    const raw = isupport['PREFIX'] || '(qaohv)~&@%+';
+    const m = raw.match(/^\(([a-zA-Z]+)\)(.+)$/);
+    if (!m) {
+        return {
+            modeToChar: { 'o': '@', 'v': '+', 'h': '%', 'a': '&', 'q': '~' },
+            charToRank: { '~': 0, '&': 1, '@': 2, '%': 3, '+': 4 },
+            charsOrdered: ['~', '&', '@', '%', '+']
+        };
+    }
+    const modes = m[1].split('');
+    const chars = m[2].split('');
+    const modeToChar = {};
+    const charToRank = {};
+    for (let i = 0; i < modes.length && i < chars.length; i++) {
+        modeToChar[modes[i]] = chars[i];
+        charToRank[chars[i]] = i;
+    }
+    return { modeToChar, charToRank, charsOrdered: chars };
+}
+
 function onMode(m) {
     const key = `${m.network}/${m.channel || 'Status'}`;
     const chan = m.channel;
@@ -964,7 +1088,8 @@ function onMode(m) {
         const parts = m.mode.split(' ');
         const modeStr = parts[0];
         const modeArgs = parts.slice(1);
-        const pfxMap = { 'o': '@', 'v': '+', 'h': '%', 'a': '&', 'q': '~' };
+        const pfxInfo = getPrefixInfo(m.network);
+        const pfxMap = pfxInfo.modeToChar;
 
         const nonPfxArg = new Set('beIk');
         let add = true;
@@ -980,8 +1105,7 @@ function onMode(m) {
                         let cur = state.nicks[key][tn];
                         if (add) {
                             if (!cur.includes(pfx)) {
-
-                                cur = '~&@%+'.split('').filter(c => cur.includes(c) || c === pfx).join('');
+                                cur = pfxInfo.charsOrdered.filter(c => cur.includes(c) || c === pfx).join('');
                             }
                         } else {
                             cur = cur.replace(pfx, '');
@@ -1067,9 +1191,13 @@ function onAwayUpdate(m) {
 }
 function onNames(m) {
     const key = `${m.network}/${m.channel}`;
+    const pfxInfo = getPrefixInfo(m.network);
+    const pfxChars = pfxInfo.charsOrdered.join('') || '~&@%+';
+    const escapedChars = pfxChars.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const pfxRegex = new RegExp(`^[${escapedChars}!.*]+`);
     const map = {};
     m.users.forEach(u => {
-        const pfx = u.match(/^[~&@%+!.*]+/)?.[0] || '';
+        const pfx = u.match(pfxRegex)?.[0] || '';
         map[u.slice(pfx.length)] = pfx;
     });
     state.nicks[key] = map;
@@ -1309,6 +1437,8 @@ function switchToHighlights() {
     $('topic-sep').style.display = 'none';
     const modesEl = $('topic-modes'); if (modesEl) modesEl.textContent = '';
     renderHighlights();
+    notifyTyping(false);
+    updateTypingDisplay();
 }
 
 function renderHighlights() {
@@ -1506,6 +1636,8 @@ function switchBuf(key) {
     }
     resetScrollPill();
     requestAnimationFrame(updateScrollPill);
+    notifyTyping(false);
+    updateTypingDisplay();
 }
 
 let _windowScrollBusy = false;
@@ -2009,14 +2141,15 @@ function _renderTreeNow() {
 function renderUserList() {
     const ul = $('userlist');
     if (!ul) return;
-    const PFX_RANK = { '~': 0, '&': 1, '@': 2, '%': 3, '+': 4 };
+    const [netId] = splitKey(state.active || '');
+    const pfxInfo = getPrefixInfo(netId);
+    const PFX_RANK = pfxInfo.charToRank;
     const entries = Object.entries(state.nicks[state.active] || {});
     entries.sort((a, b) => {
-        const ra = PFX_RANK[a[1][0]] ?? 5, rb = PFX_RANK[b[1][0]] ?? 5;
+        const ra = PFX_RANK[a[1][0]] ?? 99, rb = PFX_RANK[b[1][0]] ?? 99;
         return ra - rb || a[0].localeCompare(b[0]);
     });
     $('user-count').textContent = `(${entries.length})`;
-    const [netId] = splitKey(state.active || '');
     const awaySet = state.away[netId] || new Set();
     const botSet = state.bots[netId] || new Set();
     const frag = document.createDocumentFragment();
@@ -2270,6 +2403,7 @@ function submitInput() {
     state.historyDraft = '';
 
     $('input').value = '';
+    notifyTyping(false);
     state.tab.active = false;
     _hideSuggestions();
     _hideEmojiSuggest();
@@ -2282,6 +2416,11 @@ function submitInput() {
 
 $('input').addEventListener('input', e => {
     const val = e.target.value;
+    if (val.trim() && !val.startsWith('/')) {
+        notifyTyping(true);
+    } else {
+        notifyTyping(false);
+    }
     if (val.startsWith('/') && !val.includes(' ')) {
         const stub = val.toLowerCase();
         _suggestMatches = COMMAND_SUGGESTIONS.filter(cmd => cmd.name.startsWith(stub));
@@ -3783,13 +3922,36 @@ function showMsgCtxMenu(x, y, rec) {
     }
 })();
 
+function _handleClipboardImagePaste(e) {
+    const items = e.clipboardData?.items;
+    if (!items) return false;
+    for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+            const file = items[i].getAsFile();
+            if (file) {
+                e.preventDefault();
+                handleFileUpload(file);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 $('input').addEventListener('paste', e => {
+    if (_handleClipboardImagePaste(e)) return;
     const data = e.clipboardData.getData('text');
     if (!data.includes('\n')) return;
     const lines = data.split('\n').map(l => l.trimEnd()).filter(l => l.length > 0);
     if (lines.length <= 2) return;
     e.preventDefault();
     showPasteConfirm(lines);
+});
+
+window.addEventListener('paste', e => {
+    if (e.target === $('input')) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    _handleClipboardImagePaste(e);
 });
 
 function showPasteConfirm(lines) {
@@ -4040,7 +4202,8 @@ function updateTitle() {
     }
     const suffix = label ? `${label} — WebIRC` : 'WebIRC';
 
-    if (hlCount > 0 || state.highlightsUnread > 0) document.title = `(!) ${suffix}`;
+    const totalHl = hlCount + (state.highlightsUnread || 0);
+    if (totalHl > 0) document.title = `(!${totalHl}) ${suffix}`;
     else if (urCount > 0) document.title = `(${urCount}) ${suffix}`;
     else document.title = suffix;
 }
