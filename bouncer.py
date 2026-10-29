@@ -2018,7 +2018,6 @@ class NetworkConnection:
             channel = target if (target.startswith("#") or target.startswith("&")) else message
             if self._is_me(nick):
                 self.channels[channel] = {nick: nick}
-                await self.emit_log(f"* Now talking on {channel}", channel=channel)
                 await self._emit_status()
 
                 self._queue(f"MODE {channel}")
@@ -2414,8 +2413,17 @@ class NetworkConnection:
             elif cmd == "324":
                 chan = p[1] if len(p) > 1 else ''
                 modes = " ".join(p[2:]) if len(p) > 2 else message or ''
+                _prev_modes = self._chan_modes.get(chan)
                 self._chan_modes[chan] = modes
-                await self.emit_log(f"* Mode for {chan} is {modes}", channel=chan)
+                # Many ircds send 324 unprompted on join, and we also query MODE;
+                # only log the first of back-to-back identical replies.
+                _now = time.monotonic()
+                _last = getattr(self, "_mode_log_ts", None)
+                if _last is None:
+                    _last = self._mode_log_ts = {}
+                if not (_prev_modes == modes and _now - _last.get(chan, 0) < 10):
+                    await self.emit_log(f"* Mode for {chan} is {modes}", channel=chan)
+                    _last[chan] = _now
                 await broadcast({"type": "chan_modes", "network": self.id,
                                  "channel": chan, "modes": modes})
 
