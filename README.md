@@ -9,8 +9,9 @@ WebIRC is a two-part application: a Python backend "bouncer" that connects to IR
   pip install websockets
   ```
 
-## 2. Configuration (`data/networks.json`)
-By default, the client configuration and your personalized network list live in `data/networks.json`:
+## 2. Configuration (`config.json`)
+The client configuration and your personalized network list live in `config.json` (or `data/networks.json` for backwards compatibility):
+- **bouncer**: Configure `bind_host` and `http_bind_host` (set to `"0.0.0.0"` to listen on all public interfaces).
 - **identity**: Set your default `nick`, `username`, and `realname`. 
 - **networks**: Add any IRC networks you want to connect to. In `bouncer` mode the daemon connects immediately and logs channels history. In `direct` mode the network only connects when you click "Connect" in the UI. 
 - **auth**: If you want to password protect your WebIRC dashboard from the open internet, set `"enabled": true` and configure a `"username"` and `"password"`.

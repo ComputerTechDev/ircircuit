@@ -1,0 +1,55 @@
+{
+  "auth": {
+    "enabled": false,
+    "username": "computertech",
+    "password": ""
+  },
+  "bouncer": {
+    "bind_host": "0.0.0.0",
+    "http_bind_host": "0.0.0.0",
+    "http_port": 8080,
+    "port": 8765,
+    "allow_remote_http_api": true,
+    "enable_upload_relay": true,
+    "security": {
+      "allow_no_auth": true
+    },
+    "reconnect": true,
+    "reconnectBase": 5,
+    "reconnectMax": 300,
+    "flood": true,
+    "floodRate": 4,
+    "floodBurst": 5
+  },
+  "identity": {
+    "nick": "WebUser",
+    "username": "webuser",
+    "realname": "Web IRC Client"
+  },
+  "networks": [
+    {
+      "id": "net_rizon",
+      "name": "Rizon",
+      "servers": [
+        {
+          "host": "irc.rizon.net",
+          "port": 6697,
+          "ssl": true,
+          "verify_ssl": true
+        }
+      ],
+      "nick": "ct",
+      "username": "ct",
+      "realname": "ct",
+      "channels": [
+        "#computertech"
+      ],
+      "mode": "bouncer",
+      "autoconnect": false,
+      "logging": true,
+      "autoRejoin": false,
+      "autoRejoinDelay": 3,
+      "perform": []
+    }
+  ]
+}

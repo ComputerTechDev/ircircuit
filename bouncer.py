@@ -64,7 +64,19 @@ if '--debug' in sys.argv:
     logging.getLogger().setLevel(logging.DEBUG)
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-SETTINGS_FILE = os.path.join(ROOT_DIR, "data", "networks.json")
+
+def get_settings_file():
+    for candidate in (
+        os.path.join(ROOT_DIR, "config.json"),
+        os.path.join(ROOT_DIR, "data", "config.json"),
+        os.path.join(ROOT_DIR, "data", "networks.json"),
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return os.path.join(ROOT_DIR, "config.json")
+
+SETTINGS_FILE = get_settings_file()
+
 PUSH_SUB_FILE = os.path.join(ROOT_DIR, "data", "push_subscriptions.json")
 HIGHLIGHTS_FILE = os.path.join(ROOT_DIR, "data", "highlights.json")
 BACKLOG_DIR = os.path.join(ROOT_DIR, "data", "backlog")
@@ -323,12 +335,13 @@ def load_settings():
     if _settings_cache["data"] and (now - _settings_cache["ts"]) < BNC_CACHE_TTL:
         return _settings_cache["data"]
 
-    if os.path.exists(SETTINGS_FILE):
+    sf = get_settings_file()
+    if os.path.exists(sf):
         try:
-            with open(SETTINGS_FILE, encoding="utf-8") as f:
+            with open(sf, encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, OSError) as e:
-            log.error(f"Failed to load settings from {SETTINGS_FILE}: {e}")
+            log.error(f"Failed to load settings from {sf}: {e}")
             data = {"networks": [], "identity": {"nick": "WebUser", "username": "webuser", "realname": "Web IRC Client"}}
     else:
         data = {"networks": [], "identity": {"nick": "WebUser", "username": "webuser", "realname": "Web IRC Client"}}
@@ -343,10 +356,10 @@ def load_settings():
                 "private_key": v.private_pem().decode("utf-8"),
                 "public_key_raw": base64.urlsafe_b64encode(raw_pub).decode("utf-8").rstrip("=")
             }
-            tmp = SETTINGS_FILE + ".tmp"
+            tmp = sf + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
-            os.replace(tmp, SETTINGS_FILE)
+            os.replace(tmp, sf)
             log.info("[push] Generated VAPID keys")
         except Exception as e:
             log.error(f"[push] Failed to generate VAPID keys: {e}")
@@ -399,10 +412,11 @@ def _verify_password(plaintext: str, stored: str) -> bool:
         return False
 
 def save_settings(data):
-    tmp = SETTINGS_FILE + ".tmp"
+    sf = get_settings_file()
+    tmp = sf + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-    os.replace(tmp, SETTINGS_FILE)
+    os.replace(tmp, sf)
 
 def _scrub_settings(settings):
     import copy
@@ -3137,13 +3151,14 @@ async def main():
     bnc_settings = settings.get("bouncer", {})
     security_cfg = bnc_settings.get("security", {})
     ssl_cfg = bnc_settings.get("ssl", {})
-    bind_host = str(bnc_settings.get("bind_host", "127.0.0.1")).strip() or "127.0.0.1"
+    bind_host = str(bnc_settings.get("bind_host", settings.get("bind_host", "0.0.0.0"))).strip() or "0.0.0.0"
+    ws_port = int(bnc_settings.get("port", bnc_settings.get("ws_port", 8765)))
 
     auth_enabled = bool(settings.get("auth", {}).get("enabled"))
     allow_no_auth = bool(security_cfg.get("allow_no_auth", False))
     if not auth_enabled and not allow_no_auth:
         log.error("Refusing to start: auth is disabled and bouncer.security.allow_no_auth is false.")
-        log.error("Enable auth in data/networks.json or set allow_no_auth=true explicitly (not recommended).")
+        log.error(f"Enable auth in {get_settings_file()} or set allow_no_auth=true explicitly (not recommended).")
         return
 
     ssl_ctx = None
@@ -3162,7 +3177,7 @@ async def main():
 
     if not settings.get("auth", {}).get("enabled"):
         log.warning("SECURITY WARNING: WebSocket authentication is disabled.")
-        log.warning("Anyone who can reach port 8765 has full control of your IRC session.")
+        log.warning(f"Anyone who can reach port {ws_port} has full control of your IRC session.")
 
     for cfg in settings.get("networks", []):
         if cfg.get("autoconnect"):
@@ -3200,10 +3215,10 @@ async def main():
     else:
         log.warning(f"WebSocket bind host is non-local ({bind_host}). Ensure firewall/reverse-proxy protection is in place.")
 
-    async with websockets.serve(ws_handler, bind_host, 8765, ssl=ssl_ctx,
+    async with websockets.serve(ws_handler, bind_host, ws_port, ssl=ssl_ctx,
                                 max_size=1_048_576, process_request=_check_origin,
                                 reuse_address=True):
-        log.info(f"Bouncer listening on {bind_host}:8765 {'(SSL enabled)' if ssl_ctx else ''}")
+        log.info(f"Bouncer listening on {bind_host}:{ws_port} {'(SSL enabled)' if ssl_ctx else ''}")
         await stop_event.wait()
 
 if __name__ == "__main__":

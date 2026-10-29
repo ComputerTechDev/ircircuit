@@ -13,7 +13,19 @@ import html as html_lib
 
 PORT = 8080
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-SETTINGS_FILE = os.path.join(ROOT_DIR, "data", "networks.json")
+
+def get_settings_file():
+    for candidate in (
+        os.path.join(ROOT_DIR, "config.json"),
+        os.path.join(ROOT_DIR, "data", "config.json"),
+        os.path.join(ROOT_DIR, "data", "networks.json"),
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return os.path.join(ROOT_DIR, "config.json")
+
+SETTINGS_FILE = get_settings_file()
+
 
 _uploads_dir = os.path.join(ROOT_DIR, "data", "uploads")
 os.makedirs(_uploads_dir, exist_ok=True)
@@ -40,10 +52,11 @@ _BLOCKED_NETS = (
 )
 
 def _load_settings():
-    if not os.path.exists(SETTINGS_FILE):
+    sf = get_settings_file()
+    if not os.path.exists(sf):
         return {}
     try:
-        with open(SETTINGS_FILE, encoding="utf-8") as f:
+        with open(sf, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, json.JSONDecodeError):
         return {}
@@ -538,7 +551,7 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 _ssl_active = False
 
 def _get_ssl_ctx():
-    settings_file = os.path.join(ROOT_DIR, "data", "networks.json")
+    settings_file = get_settings_file()
     if not os.path.exists(settings_file):
         return None
     try:
@@ -564,16 +577,28 @@ def _get_ssl_ctx():
 
 def _get_bind_host():
     settings = _load_settings()
-    return str(settings.get("bouncer", {}).get("http_bind_host", "127.0.0.1")).strip() or "127.0.0.1"
+    bnc = settings.get("bouncer", {})
+    return str(bnc.get("http_bind_host", bnc.get("bind_host", settings.get("bind_host", "0.0.0.0")))).strip() or "0.0.0.0"
+
+def _get_http_port():
+    settings = _load_settings()
+    bnc = settings.get("bouncer", {})
+    val = bnc.get("http_port", settings.get("http_port", PORT))
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return PORT
 
 if __name__ == '__main__':
     ssl_ctx = _get_ssl_ctx()
     bind_host = _get_bind_host()
-    with ThreadingHTTPServer((bind_host, PORT), CustomHTTPRequestHandler) as httpd:
+    port = _get_http_port()
+    with ThreadingHTTPServer((bind_host, port), CustomHTTPRequestHandler) as httpd:
         if ssl_ctx:
             httpd.socket = ssl_ctx.wrap_socket(httpd.socket, server_side=True)
             _ssl_active = True
-            print(f"Serving HTTPS on {bind_host}:{PORT}")
+            print(f"Serving HTTPS on {bind_host}:{port}")
         else:
-            print(f"Serving HTTP on {bind_host}:{PORT}")
+            print(f"Serving HTTP on {bind_host}:{port}")
         httpd.serve_forever()
+
